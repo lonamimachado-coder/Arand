@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vesper</title>
+<style>
+  :root{
+    --bg:#0d0f14; --card:#161a23; --text:#e8eaf0; --muted:#8a91a6;
+    --accent:#7c9dff; --accent2:#5ad1c9; --danger:#ff6b6b; --border:#242938;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; min-height:100vh; background:radial-gradient(circle at 50% 0%, #1a2030, #0d0f14 60%);
+    color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    display:flex; align-items:center; justify-content:center; padding:24px;
+  }
+  .wrap{width:100%; max-width:460px;}
+  .card{
+    background:var(--card); border:1px solid var(--border); border-radius:20px;
+    padding:24px; margin-bottom:16px;
+  }
+  h1{font-size:22px; margin:0 0 4px; letter-spacing:0.5px;}
+  .sub{color:var(--muted); font-size:13px; margin:0 0 20px;}
+  label{display:block; font-size:12px; color:var(--muted); margin-bottom:6px; margin-top:14px;}
+  input[type="password"], input[type="text"], select{
+    width:100%; padding:11px 12px; border-radius:10px; border:1px solid var(--border);
+    background:#10131b; color:var(--text); font-size:14px; outline:none;
+  }
+  input:focus, select:focus{border-color:var(--accent);}
+  .row{display:flex; gap:10px;}
+  .row > div{flex:1;}
+  .orb{
+    width:120px; height:120px; border-radius:50%; margin:6px auto 18px;
+    background:radial-gradient(circle at 35% 30%, var(--accent), #2b3560 70%);
+    display:flex; align-items:center; justify-content:center;
+    box-shadow:0 0 0 0 rgba(124,157,255,0.4);
+    transition:box-shadow .3s ease, transform .3s ease;
+  }
+  .orb.listening{animation:pulse 1.6s infinite;}
+  .orb.processing{background:radial-gradient(circle at 35% 30%, #ffcf5c, #6b5a2b 70%); animation:spin 1.2s linear infinite;}
+  .orb.speaking{background:radial-gradient(circle at 35% 30%, var(--accent2), #22443f 70%); animation:pulse 0.7s infinite;}
+  @keyframes pulse{
+    0%{box-shadow:0 0 0 0 rgba(124,157,255,0.45);}
+    70%{box-shadow:0 0 0 22px rgba(124,157,255,0);}
+    100%{box-shadow:0 0 0 0 rgba(124,157,255,0);}
+  }
+  @keyframes spin{ from{transform:rotate(0deg);} to{transform:rotate(360deg);} }
+  .status{text-align:center; font-size:14px; color:var(--muted); min-height:20px; margin-bottom:4px;}
+  .toggle{
+    width:100%; padding:13px; border-radius:12px; border:none; font-size:15px; font-weight:600;
+    cursor:pointer; margin-top:18px; background:var(--accent); color:#0b0e14;
+  }
+  .toggle.on{background:var(--danger); color:#1a0d0d;}
+  .toggle:disabled{opacity:0.5; cursor:not-allowed;}
+  .log{
+    max-height:220px; overflow-y:auto; font-size:13px; line-height:1.5;
+    display:flex; flex-direction:column; gap:8px;
+  }
+  .log .u{color:var(--accent);}
+  .log .a{color:var(--accent2);}
+  .log .sys{color:var(--muted); font-style:italic;}
+  .hint{color:var(--muted); font-size:12px; text-align:center; margin-top:10px;}
+  .savebtn{
+    margin-top:14px; width:100%; padding:9px; border-radius:10px; border:1px solid var(--border);
+    background:transparent; color:var(--muted); font-size:12px; cursor:pointer;
+  }
+  .savebtn:hover{color:var(--text); border-color:var(--accent);}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="card">
+    <h1>Vesper</h1>
+    <p class="sub">Tu amigo por voz. Di "Vesper" (o "oye Vesper") para hablarle.</p>
+
+    <div class="orb" id="orb">🎙️</div>
+    <div class="status" id="status">Desactivado</div>
+
+    <button class="toggle" id="toggleBtn">Activar Vesper</button>
+
+    <label style="margin-top:22px;">API key de Groq</label>
+    <input type="password" id="apiKey" placeholder="gsk_...">
+
+    <label>Modelo (nivel gratuito de Groq)</label>
+    <select id="model">
+      <option value="llama-3.1-8b-instant">llama-3.1-8b-instant (rápido, recomendado)</option>
+      <option value="llama-3.3-70b-versatile">llama-3.3-70b-versatile (más capaz)</option>
+      <option value="openai/gpt-oss-20b">openai/gpt-oss-20b</option>
+      <option value="openai/gpt-oss-120b">openai/gpt-oss-120b</option>
+      <option value="groq/compound-mini">groq/compound-mini</option>
+    </select>
+
+    <button class="savebtn" id="saveBtn">Guardar configuración</button>
+    <p class="hint">La clave se guarda solo en este navegador (localStorage). Consíguela gratis en console.groq.com/keys — funciona sin tarjeta bajo los límites del plan gratuito.</p>
+  </div>
+
+  <div class="card">
+    <div class="log" id="log"></div>
+  </div>
+
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  // ---------- Elementos ----------
+  const apiKeyInput = document.getElementById('apiKey');
+  const modelSelect = document.getElementById('model');
+  const saveBtn = document.getElementById('saveBtn');
+  const toggleBtn = document.getElementById('toggleBtn');
+  const statusEl = document.getElementById('status');
+  const orbEl = document.getElementById('orb');
+  const logEl = document.getElementById('log');
+
+  // ---------- Config persistente ----------
+  apiKeyInput.value = localStorage.getItem('vesper_key') || '';
+  modelSelect.value = localStorage.getItem('vesper_model') || 'llama-3.1-8b-instant';
+
+  saveBtn.addEventListener('click', () => {
+    localStorage.setItem('vesper_key', apiKeyInput.value.trim());
+    localStorage.setItem('vesper_model', modelSelect.value);
+    addLog('sys', 'Configuración guardada.');
+  });
+
+  // ---------- Personalidad ----------
+  const SYSTEM_PROMPT = `Eres Vesper. Hablas por voz con la persona como si fueras un amigo cercano de toda la vida, nunca como una inteligencia artificial, un asistente virtual ni un chatbot.
+Reglas de estilo, muy importantes:
+- No te presentes, no digas "como IA", "como asistente", "estoy aquí para ayudarte" ni nada parecido.
+- No ofrezcas ayuda extra al final ni preguntes "¿en qué más puedo ayudarte?".
+- No uses listas, ni markdown, ni emojis, ni encabezados. Solo texto hablado natural.
+- Responde en 1 a 3 frases cortas, coloquiales, como en una charla real por voz. Solo da más detalle si te lo piden explícitamente.
+- Usa tuteo, tono cercano y natural, como hablaría un amigo español o latino relajado. Puedes usar muletillas naturales ocasionalmente.
+- Si no sabes algo, dilo con naturalidad ("ni idea", "no tengo claro eso"), nunca como una disculpa robótica.
+- Nunca menciones que eres un modelo de lenguaje, IA, ni des explicaciones técnicas de ti mismo salvo que te pregunten directamente y sin rodeos.`;
+
+  let history = [];
+
+  // ---------- Estado ----------
+  // idle | listening_command | processing | speaking
+  let state = 'idle';
+  let active = false;
+  let commandTimeout = null;
+
+  function setStatus(text){ statusEl.textContent = text; }
+  function setOrb(cls){ orbEl.className = 'orb ' + cls; }
+
+  function addLog(kind, text){
+    const div = document.createElement('div');
+    div.className = kind;
+    const prefix = kind === 'u' ? 'Tú: ' : kind === 'a' ? 'Vesper: ' : '';
+    div.textContent = prefix + text;
+    logEl.appendChild(div);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  // ---------- Reconocimiento de voz ----------
+  const SpeechRecognitionImpl = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let recognition = null;
+
+  if (!SpeechRecognitionImpl) {
+    setStatus('Este navegador no soporta reconocimiento de voz (usa Chrome).');
+    toggleBtn.disabled = true;
+  } else {
+    recognition = new SpeechRecognitionImpl();
+    recognition.continuous = true;
+    recognition.interimResults = false;
+    recognition.lang = 'es-ES';
+
+    recognition.onresult = (event) => {
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        if (!event.results[i].isFinal) continue;
+        const transcript = event.results[i][0].transcript.trim();
+        if (!transcript) continue;
+
+        if (state === 'idle') {
+          const cmd = extractAfterWake(transcript);
+          if (cmd === null) continue; // no se dijo "vesper", ignorar
+          state = 'processing';
+          try { recognition.stop(); } catch(e){}
+          if (cmd.length > 2) {
+            handleCommand(cmd);
+          } else {
+            handleBareWake();
+          }
+        } else if (state === 'listening_command') {
+          clearTimeout(commandTimeout);
+          state = 'processing';
+          try { recognition.stop(); } catch(e){}
+          handleCommand(transcript);
+        }
+        // en 'processing' o 'speaking' se ignora todo: no se puede interrumpir a Vesper
+      }
+    };
+
+    recognition.onerror = (e) => {
+      if (e.error === 'no-speech' || e.error === 'aborted') return;
+      console.warn('Error de reconocimiento:', e.error);
+    };
+
+    recognition.onend = () => {
+      if (active && (state === 'idle' || state === 'listening_command')) {
+        try { recognition.start(); } catch(e){}
+      }
+    };
+  }
+
+  function extractAfterWake(transcript){
+    const match = transcript.match(/vesper/i);
+    if (!match) return null;
+    return transcript.slice(match.index + match[0].length).trim();
+  }
+
+  function startRecognitionSafely(){
+    if (!active || !recognition) return;
+    try { recognition.start(); } catch(e){ /* ya estaba iniciado */ }
+  }
+
+  // ---------- Texto a voz ----------
+  let spanishVoice = null;
+  function pickVoice(){
+    const voices = speechSynthesis.getVoices();
+    spanishVoice = voices.find(v => v.lang && v.lang.toLowerCase().startsWith('es')) || null;
+  }
+  pickVoice();
+  if ('onvoiceschanged' in speechSynthesis) {
+    speechSynthesis.onvoiceschanged = pickVoice;
+  }
+
+  function speak(text){
+    return new Promise((resolve) => {
+      if (!text) { resolve(); return; }
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.lang = 'es-ES';
+      if (spanishVoice) utter.voice = spanishVoice;
+      utter.rate = 1.03;
+      utter.pitch = 1.0;
+      utter.onend = resolve;
+      utter.onerror = resolve;
+      speechSynthesis.cancel(); // por seguridad, no acumular colas
+      speechSynthesis.speak(utter);
+    });
+  }
+
+  // ---------- Groq ----------
+  async function askGroq(userText){
+    const apiKey = localStorage.getItem('vesper_key');
+    const model = localStorage.getItem('vesper_model') || 'llama-3.1-8b-instant';
+    if (!apiKey) throw new Error('Falta la API key de Groq.');
+
+    history.push({ role: 'user', content: userText });
+    const messages = [{ role: 'system', content: SYSTEM_PROMPT }, ...history.slice(-12)];
+
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + apiKey
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        temperature: 0.8,
+        max_tokens: 180
+      })
+    });
+
+    if (!res.ok) {
+      let msg = 'Error ' + res.status;
+      try { const j = await res.json(); if (j.error && j.error.message) msg = j.error.message; } catch(e){}
+      throw new Error(msg);
+    }
+
+    const data = await res.json();
+    const reply = (data.choices && data.choices[0] && data.choices[0].message.content || '').trim();
+    history.push({ role: 'assistant', content: reply });
+    return reply || 'Se me ha ido la cabeza un momento, repíteme eso.';
+  }
+
+  // ---------- Flujo principal ----------
+  const ACKS = ['¿Sí?', 'Dime', '¿Qué pasa?', 'Cuéntame', 'Te escucho', '¿Qué hay?'];
+
+  async function handleBareWake(){
+    addLog('u', '(Vesper)');
+    setOrb('speaking');
+    setStatus('...');
+    const ack = ACKS[Math.floor(Math.random() * ACKS.length)];
+    addLog('a', ack);
+    await speak(ack);
+
+    state = 'listening_command';
+    setOrb('listening');
+    setStatus('Te escucho...');
+    startRecognitionSafely();
+
+    clearTimeout(commandTimeout);
+    commandTimeout = setTimeout(() => {
+      if (state === 'listening_command') {
+        state = 'idle';
+        setOrb('listening');
+        setStatus('Escuchando... di "Vesper"');
+      }
+    }, 8000);
+  }
+
+  async function handleCommand(text){
+    addLog('u', text);
+    setOrb('processing');
+    setStatus('Pensando...');
+    let reply;
+    try {
+      reply = await askGroq(text);
+    } catch (err) {
+      reply = 'No he podido conectar bien. ' + (err.message ? err.message : '');
+      console.error(err);
+    }
+    addLog('a', reply);
+    setOrb('speaking');
+    setStatus('Hablando...');
+    await speak(reply);
+
+    state = 'idle';
+    setOrb('listening');
+    setStatus('Escuchando... di "Vesper"');
+    startRecognitionSafely();
+  }
+
+  // ---------- Activar / desactivar ----------
+  toggleBtn.addEventListener('click', () => {
+    if (!recognition) return;
+
+    if (!active) {
+      if (!localStorage.getItem('vesper_key')) {
+        localStorage.setItem('vesper_key', apiKeyInput.value.trim());
+        localStorage.setItem('vesper_model', modelSelect.value);
+      }
+      if (!localStorage.getItem('vesper_key')) {
+        addLog('sys', 'Introduce y guarda tu API key de Groq antes de activar.');
+        return;
+      }
+      active = true;
+      state = 'idle';
+      toggleBtn.textContent = 'Desactivar Vesper';
+      toggleBtn.classList.add('on');
+      setOrb('listening');
+      setStatus('Escuchando... di "Vesper"');
+      addLog('sys', 'Vesper activado.');
+      startRecognitionSafely();
+    } else {
+      active = false;
+      state = 'idle';
+      clearTimeout(commandTimeout);
+      try { recognition.stop(); } catch(e){}
+      speechSynthesis.cancel();
+      toggleBtn.textContent = 'Activar Vesper';
+      toggleBtn.classList.remove('on');
+      setOrb('');
+      setStatus('Desactivado');
+      addLog('sys', 'Vesper desactivado.');
+    }
+  });
+
+})();
+</script>
+</body>
+</html>
